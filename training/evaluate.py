@@ -48,91 +48,85 @@ def evaluate_model(model, test_loader, device='cuda'):
     }
 
 def generate_trading_signals(probabilities, threshold_buy=0.6, threshold_sell=0.6):
-    """Generate trading signals based on model output probabilities for 3 classes."""
+    """Generate signals if up/down prob exceeds its threshold, else hold."""
     signals = np.zeros(len(probabilities))
-    
+
     for i, probs in enumerate(probabilities):
-        # probs is array of shape (3,) with [P(down), P(sideways), P(up)]
-        if probs[2] >= threshold_buy:  # High probability for "up" class (index 2)
-            signals[i] = 1  # Buy signal
-        elif probs[0] >= threshold_sell:  # High probability for "down" class (index 0)
-            signals[i] = -1  # Sell signal
-        # Otherwise signal remains 0 (hold)
-    
+        p_down, p_side, p_up = probs
+        if p_up >= p_down:
+            if p_up >= threshold_buy:
+                signals[i] = 1
+        else:
+            if p_down >= threshold_sell:
+                signals[i] = -1
+    # Note: 0 is hold, 1 is buy, -1 is sell
     return signals
 
-def backtest_strategy(close_prices, signals, transaction_cost=0.0005):
-    """Simple backtesting of a trading strategy."""
-    # Initialize portfolio and positions
-    portfolio_value = np.ones(len(signals) + 1)  # Start with $1
-    position = 0  # 0 = no position, 1 = long, -1 = short
+def backtest_strategy(aligned_test_original_features, signals, transaction_cost=0.0005):
+    """Backtest with proper cost handling & chained P&L on closes+opens."""
+    close_prices = aligned_test_original_features['close'].values
+    portfolio_value = np.ones(len(signals) + 1)
+    position = 0
     trades = 0
-    
-    # Metrics to track
     daily_returns = []
     
-    # Execute trades based on signals
     for i in range(len(signals)):
-        # Current portfolio value (before potential trade)
-        current_value = portfolio_value[i]
+        prev_val = portfolio_value[i]
+        price_ratio = close_prices[i] / close_prices[i-1] - 1
+        value = prev_val
         
-        # Check for a trade signal
-        if signals[i] == 1 and position <= 0:  # Buy signal
-            # Close short position if exists
+        if signals[i] == 1 and position <= 0:  # Buy
             if position == -1:
-                # Close short position
-                returns = 2 * transaction_cost - (close_prices[i] / close_prices[i-1] - 1)
-                portfolio_value[i+1] = current_value * (1 + returns)
+                # close short: profit = –price change minus round‑trip costs
+                ret = -price_ratio - 2*transaction_cost
+                value *= (1 + ret)
                 trades += 1
-                
-            # Open long position
+            # open long
             position = 1
-            portfolio_value[i+1] = current_value * (1 - transaction_cost)
+            value *= (1 - transaction_cost)
             trades += 1
-            
-        elif signals[i] == -1 and position >= 0:  # Sell signal
-            # Close long position if exists
+
+        elif signals[i] == -1 and position >= 0:  # Sell
             if position == 1:
-                # Close long position
-                returns = (close_prices[i] / close_prices[i-1] - 1) - 2 * transaction_cost
-                portfolio_value[i+1] = current_value * (1 + returns)
+                # close long: profit = price change minus round‑trip costs
+                ret = price_ratio - 2*transaction_cost
+                value *= (1 + ret)
                 trades += 1
-                
-            # Open short position
+            # open short
             position = -1
-            portfolio_value[i+1] = current_value * (1 - transaction_cost)
+            value *= (1 - transaction_cost)
             trades += 1
-            
+
         else:
-            # No change in position, just update portfolio value based on current position
-            if position == 1:  # Long position
-                portfolio_value[i+1] = current_value * (1 + (close_prices[i] / close_prices[i-1] - 1))
-            elif position == -1:  # Short position
-                portfolio_value[i+1] = current_value * (1 - (close_prices[i] / close_prices[i-1] - 1))
-            else:  # No position
-                portfolio_value[i+1] = current_value
-        
-        # Calculate daily return
-        daily_returns.append(portfolio_value[i+1] / portfolio_value[i] - 1)
+            # hold existing position (no extra costs)
+            if position == 1:
+                value *= (1 + price_ratio)
+            elif position == -1:
+                value *= (1 - price_ratio)
+            # else value stays the same
+
+        portfolio_value[i+1] = value
+        daily_returns.append(value/prev_val - 1)
     
-    # Calculate performance metrics
     total_return = portfolio_value[-1] - 1
-    annual_return = (1 + total_return) ** (252 / len(signals)) - 1
-    sharpe_ratio = np.sqrt(252) * np.mean(daily_returns) / np.std(daily_returns) if np.std(daily_returns) > 0 else 0
-    max_drawdown = np.max(np.maximum.accumulate(portfolio_value) - portfolio_value) / np.max(portfolio_value)
+    daily_return = (1 + total_return) ** (360 / len(signals)) - 1
+    sharpe_ratio = (np.sqrt(360) * np.mean(daily_returns)
+                    / np.std(daily_returns) if np.std(daily_returns) > 0 else 0)
+    max_dd = np.max(np.maximum.accumulate(portfolio_value) - portfolio_value) \
+             / np.max(portfolio_value)
     
-    print(f"Total Return: {total_return:.4f} ({total_return*100:.2f}%)")
-    print(f"Annualized Return: {annual_return:.4f} ({annual_return*100:.2f}%)")
+    print(f"Total Return: {total_return:.4f}")
+    print(f"Daily Return: {daily_return:.4f}")
     print(f"Sharpe Ratio: {sharpe_ratio:.4f}")
-    print(f"Max Drawdown: {max_drawdown:.4f} ({max_drawdown*100:.2f}%)")
+    print(f"Max Drawdown: {max_dd:.4f}")
     print(f"Total Trades: {trades}")
     
     return {
         'portfolio_value': portfolio_value,
         'total_return': total_return,
-        'annual_return': annual_return,
+        'daily_return': daily_return,
         'sharpe_ratio': sharpe_ratio,
-        'max_drawdown': max_drawdown,
+        'max_drawdown': max_dd,
         'trades': trades,
         'daily_returns': daily_returns
     }
@@ -179,7 +173,7 @@ def plot_results(history, backtest_results):
     # Add backtest metrics as text
     metrics_text = (
         f"Total Return: {backtest_results['total_return']:.4f}\n"
-        f"Annual Return: {backtest_results['annual_return']:.4f}\n"
+        f"Daily Return: {backtest_results['daily_return']:.4f}\n"
         f"Sharpe Ratio: {backtest_results['sharpe_ratio']:.4f}\n"
         f"Max Drawdown: {backtest_results['max_drawdown']:.4f}\n"
         f"Trades: {backtest_results['trades']}"

@@ -31,7 +31,7 @@ def main():
     
     # Prepare data
     print("Preparing data...")
-    train_loader, val_loader, test_loader, input_dim = prepare_data(
+    train_loader, val_loader, test_loader, aligned_test_original_features, input_dim = prepare_data(
         file_path=cfg.DATA_PATH,
         seq_length=cfg.SEQ_LENGTH,
         horizon=cfg.HORIZON,
@@ -79,26 +79,11 @@ def main():
         threshold_buy=cfg.THRESHOLD_BUY,
         threshold_sell=cfg.THRESHOLD_SELL
     )
-    
-    # Load test data for backtesting
-    test_data = pd.read_csv(cfg.DATA_PATH)
-    
-    # Check which column name exists in the DataFrame
-    if 'close' in test_data.columns:
-        close_column = 'close'
-    elif 'Close' in test_data.columns:
-        close_column = 'Close'
-    else:
-        raise KeyError("Neither 'close' nor 'Close' column found in the data")
-    
-    # For simplicity, we'll use a subset of the data for backtesting
-    # In a real implementation, you would align this with your test set
-    close_prices = test_data[close_column].values[-len(signals):]
-    
+
     # Backtest strategy
     print("Backtesting strategy...")
     backtest_results = backtest_strategy(
-        close_prices=close_prices,
+        aligned_test_original_features = aligned_test_original_features,
         signals=signals,
         transaction_cost=cfg.TRANSACTION_COST
     )
@@ -117,7 +102,7 @@ def main():
         'confusion_matrix': eval_results['confusion_matrix'].tolist(),
         'backtest': {
             'total_return': backtest_results['total_return'],
-            'annual_return': backtest_results['annual_return'],
+            'daily_return': backtest_results['daily_return'],
             'sharpe_ratio': backtest_results['sharpe_ratio'],
             'max_drawdown': backtest_results['max_drawdown']
         }

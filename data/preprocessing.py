@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 import torch
 from torch.utils.data import TensorDataset, DataLoader
+import joblib
 
 def load_and_clean_data(file_path):
     """Load and clean the OHLCV data."""
@@ -52,6 +53,10 @@ def calculate_features(df):
     if 'high' in df.columns and 'low' in df.columns and 'close' in df.columns:
         df['relative_position'] = (df['close'] - df['low']) / (df['high'] - df['low'])
 
+    # Body/Wick Ratio (C-O)/(H-L) --> one feature
+    if 'high' in df.columns and 'low' in df.columns and 'open' in df.columns and 'close' in df.columns:
+        df['body_wick_ratio'] = (df['close'] - df['open']) / (df['high'] - df['low'])
+
     # Cyclical time features, from 3:45 to 10:00, sin and cos --> two features
     minutes_in_day = 10 * 60 - (3 * 60 + 45)
     minute_of_day = (df['datetime'].dt.hour - 3) * 60 + (df['datetime'].dt.minute - 45)
@@ -95,8 +100,8 @@ def create_target(df, horizon=5, threshold=0.0015):
 
     # Define conditions for target labels
     conditions = [
-        future_max_high > upper_bound,  # Price goes up significantly
-        future_min_low < lower_bound   # Price goes down significantly
+        (future_max_high - df['close'] >= df['close'] - future_min_low) & (future_max_high >= upper_bound),  # Price goes up significantly
+        (df['close'] - future_min_low > future_max_high - df['close']) & (future_min_low <= lower_bound),  # Price goes down significantly
     ]
 
     # Define choices corresponding to conditions: 2 for up, 0 for down
@@ -120,12 +125,15 @@ def split_features(df):
     """Create two different dataframes: one with input features and other with all features."""
     # Create a copy of the DataFrame to avoid modifying the original
     df_features = df.copy()
+
+    # Create a df with (timestamp, open, high, low, close, volume)
+    df_original = df_features[['timestamp', 'open', 'high', 'low', 'close', 'volume']].copy()
     
-    # Remove columns (timestamp, open, high, low, close, volume, datetime)
+    # Remove columns (timestamp, open, high, low, close, volume, datetime) in df_features
     columns_to_remove = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'datetime']
     df_features.drop(columns=columns_to_remove, inplace=True, errors='ignore')
     
-    return df_features
+    return df_features, df_original
 
 
 def split_data(df, train_size=0.7, val_size=0.15):
@@ -137,8 +145,10 @@ def split_data(df, train_size=0.7, val_size=0.15):
     train_df = df.iloc[:train_end].copy()
     val_df = df.iloc[train_end:val_end].copy()
     test_df = df.iloc[val_end:].copy()
+
+    test_original_indices = df.index[val_end:].tolist()
     
-    return train_df, val_df, test_df
+    return train_df, val_df, test_df, test_original_indices
 
 def scale_features(train_df, val_df, test_df):
     """Scale the features using StandardScaler fit on training data."""
@@ -149,6 +159,9 @@ def scale_features(train_df, val_df, test_df):
     # Fit scaler on training data
     scaler = StandardScaler()
     scaler.fit(train_df[feature_cols])
+
+    # Save the scaler as scaler.joblib
+    joblib.dump(scaler, 'data/scaler.joblib')
     
     # Transform all datasets
     train_df[feature_cols] = scaler.transform(train_df[feature_cols])
@@ -167,7 +180,7 @@ def create_sequences(df, seq_length=60):
     target_array = df['target'].values
     
     X, y = [], []
-    for i in range(len(df) - seq_length):
+    for i in range(len(df) - seq_length + 1):
         X.append(data_array[i:i+seq_length])
         y.append(target_array[i+seq_length-1])
         
@@ -209,10 +222,14 @@ def prepare_data(file_path, seq_length=60, horizon=5, batch_size=32):
     df = create_target(df, horizon=horizon)
 
     # Split features for model input
-    dff = split_features(df)
+    df_features, df_original = split_features(df)
     
     # Split data
-    train_df, val_df, test_df = split_data(dff)
+    train_df, val_df, test_df, test_original_indices  = split_data(df_features, train_size=0.7, val_size=0.15)
+
+    # Ensure the test set is aligned with the original data
+    if len(test_original_indices) != len(test_df):
+        print(f"Warning: Length mismatch between test_original_indices ({len(test_original_indices)}) and test_df ({len(test_df)}).")
     
     # Scale features
     train_df, val_df, test_df, feature_cols = scale_features(train_df, val_df, test_df)
@@ -221,6 +238,18 @@ def prepare_data(file_path, seq_length=60, horizon=5, batch_size=32):
     X_train, y_train = create_sequences(train_df, seq_length=seq_length)
     X_val, y_val = create_sequences(val_df, seq_length=seq_length)
     X_test, y_test = create_sequences(test_df, seq_length=seq_length)
+
+    # Align original indices & features with sequences
+    aligned_test_original_indices = test_original_indices[seq_length-1:]
+    aligned_test_original_df = df_original.loc[aligned_test_original_indices]
+
+    # Ensure the test set is aligned with the original data
+    if len(y_test) != len(aligned_test_original_df):
+         print(f"Warning: Length mismatch between y_test ({len(y_test)}) and aligned_test_original_df ({len(aligned_test_original_df)}). Truncating.")
+         min_len = min(len(y_test), len(aligned_test_original_df))
+         y_test = y_test[:min_len]
+         X_test = X_test[:min_len]
+         aligned_test_original_df = aligned_test_original_df[:min_len]
     
     # Create dataloaders
     train_loader, val_loader, test_loader = create_dataloaders(
@@ -229,4 +258,4 @@ def prepare_data(file_path, seq_length=60, horizon=5, batch_size=32):
     
     input_dim = X_train.shape[2]
     
-    return train_loader, val_loader, test_loader, input_dim
+    return train_loader, val_loader, test_loader, aligned_test_original_df, input_dim
