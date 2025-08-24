@@ -1,2 +1,0 @@
-model_config,training_time,accuracy,f1_score,confusion_matrix,backtest
-{},2263.485865354538,0.7024654811932018,0.6354508491228059,"[[481, 5866, 1298], [400, 31563, 860], [568, 5381, 1890]]","{'total_return': np.float64(-0.0030236720443015397), 'daily_return': np.float64(-2.2567301349973867e-05), 'sharpe_ratio': np.float64(0.005243407481577573), 'max_drawdown': np.float64(0.20718103648616726)}"

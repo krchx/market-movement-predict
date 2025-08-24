@@ -14,15 +14,15 @@ class Config:
 
     # --- Training Parameters ---
     BATCH_SIZE = 32                 # Number of samples per batch during training
-    EPOCHS = 10                     # Maximum number of training epochs
+    EPOCHS = 20                     # Maximum number of training epochs
     LR = 1e-4                       # Learning rate for the optimizer
     WEIGHT_DECAY = 1e-4             # Weight decay (L2 penalty) for the optimizer
     PATIENCE = 5                    # Number of epochs to wait for improvement before early stopping
     CPU = False                     # If True, force CPU usage even if CUDA is available
 
     # --- Trading Parameters ---
-    THRESHOLD_BUY = 0.4           # Probability threshold to generate a buy signal
-    THRESHOLD_SELL = 0.4          # Probability threshold to generate a sell signal (or hold/neutral)
+    THRESHOLD_BUY = 0.6           # Probability threshold to generate a buy signal
+    THRESHOLD_SELL = 0.6          # Probability threshold to generate a sell signal (or hold/neutral)
     TRANSACTION_COST = 0.000       # Simulated transaction cost per trade (e.g., 0.05%)
 
     # --- Runtime Determined ---

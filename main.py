@@ -1,7 +1,6 @@
 import torch
 import os
 import time
-import numpy as np
 import pandas as pd
 
 os.putenv("HSA_OVERRIDE_GFX_VERSION", "10.3.0")
@@ -12,8 +11,6 @@ from models import HybridCNNGRUAttentionModel
 from training import (
     train_model, 
     evaluate_model, 
-    generate_trading_signals, 
-    backtest_strategy, 
     plot_results
 )
 
@@ -72,25 +69,9 @@ def main():
     print("Evaluating model...")
     eval_results = evaluate_model(model, test_loader, device=device)
     
-    # Generate trading signals
-    print("Generating trading signals...")
-    signals = generate_trading_signals(
-        eval_results['probabilities'],
-        threshold_buy=cfg.THRESHOLD_BUY,
-        threshold_sell=cfg.THRESHOLD_SELL
-    )
-
-    # Backtest strategy
-    print("Backtesting strategy...")
-    backtest_results = backtest_strategy(
-        aligned_test_original_features = aligned_test_original_features,
-        signals=signals,
-        transaction_cost=cfg.TRANSACTION_COST
-    )
-    
     # Plot results
     print("Plotting results...")
-    plot_results(history, backtest_results)
+    plot_results(history)
     
     # Save results
     results = {
@@ -100,12 +81,6 @@ def main():
         'accuracy': eval_results['accuracy'],
         'f1_score': eval_results['f1'],
         'confusion_matrix': eval_results['confusion_matrix'].tolist(),
-        'backtest': {
-            'total_return': backtest_results['total_return'],
-            'daily_return': backtest_results['daily_return'],
-            'sharpe_ratio': backtest_results['sharpe_ratio'],
-            'max_drawdown': backtest_results['max_drawdown']
-        }
     }
     
     # Convert results to DataFrame and save as CSV

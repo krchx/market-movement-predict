@@ -1,2 +1,8 @@
-# any data for training
-*.csv
+# any data for training .csv files in any folder
+**/*.csv
+
+# any trained model files
+**/*.pth
+
+# any joblib file
+**/*.joblib
