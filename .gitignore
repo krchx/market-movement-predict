@@ -6,3 +6,6 @@
 
 # any joblib file
 **/*.joblib
+
+# any pycache file
+**/__pycache__/
