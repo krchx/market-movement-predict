@@ -5,7 +5,7 @@ import numpy as np
 from config import cfg
 from models.architecture import HybridCNNGRUAttentionModel
 from data.preprocessing import load_and_clean_data, calculate_features, split_features, create_target
-from test.start_trading import start_trading
+from trade.start_trading import start_trading
 
 # --- Configuration ---
 DEVICE = cfg.DEVICE
